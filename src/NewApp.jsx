@@ -16,10 +16,7 @@ import SelectTrialModal from './components/SelectTrialModal';
 import LeftPanelNew from './components/LeftPanelNew';
 import RightPanelNew from './components/RightPanelNew';
 import DownloadSection from './components/DownloadSection';
-import {
-  getProcessedEEGData,
-  getAugmentationMethods
-} from './data/newMockData';
+import { fetchTrialEEGData } from './utils/eegApi';
 import './NewApp.css';
 
 // Register Chart.js components
@@ -33,6 +30,8 @@ ChartJS.register(
   Legend,
   Filler
 );
+
+const RANDOM_MOTION_LABELS = ['👈 Left Hand', '👉 Right Hand', '🦶 Feet', '👅 Tongue'];
 
 function NewApp() {
   // Mode and selection states
@@ -48,8 +47,9 @@ function NewApp() {
   const [selectedTrial, setSelectedTrial] = useState(null);
 
   // Data states
-  const [eegData, setEegData] = useState(null);
-  const [labels, setLabels] = useState(null);
+  const [processedEEG, setProcessedEEG] = useState(null);
+  const [labels, setLabels] = useState([]);
+  const [error, setError] = useState(null);
 
   // Processing options
   const [eogRemoved, setEogRemoved] = useState(false);
@@ -65,10 +65,35 @@ function NewApp() {
   // Loading state
   const [isLoading, setIsLoading] = useState(false);
 
+  const loadTrialData = async ({ trialId, removeEOGFlag, extractMIFlag }) => {
+    if (!trialId) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const data = await fetchTrialEEGData(trialId, {
+        removeEOG: removeEOGFlag,
+        extractMI: extractMIFlag
+      });
+
+      setProcessedEEG(data?.processed ?? null);
+      setLabels(data?.processed?.labels ?? []);
+    } catch (err) {
+      console.error('Failed to load EEG data', err);
+      setProcessedEEG(null);
+      setLabels([]);
+      setError(err.message || 'Failed to load EEG data from the server.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Handle trial selection from modal
   const handleSelectTrial = (trial) => {
     setSelectedTrial(trial);
-    // Don't load data yet - wait for View button click
   };
 
   // Handle View button click - Load and visualize data
@@ -78,8 +103,6 @@ function NewApp() {
       return;
     }
 
-    setIsLoading(true);
-
     // Reset all states when viewing new data
     setEogRemoved(false);
     setMiExtracted(false);
@@ -87,57 +110,26 @@ function NewApp() {
     setAugmentedDatasets([]);
     setClassificationResults({});
 
-    setTimeout(() => {
-      // Generate mock EEG data
-      const result = getProcessedEEGData(1, 1, {
-        removeEOGFlag: false,
-        extractMIFlag: false,
-        augmentationMethods: []
-      });
-
-      setEegData(result.processed.data);
-      setLabels(result.processed.labels);
-      setIsLoading(false);
-    }, 500);
+    loadTrialData({
+      trialId: selectedTrial.id,
+      removeEOGFlag: false,
+      extractMIFlag: false
+    });
   };
-
-  // Update data when processing options change
-  useEffect(() => {
-    if (eegData) {
-      const result = getProcessedEEGData(1, 1, {
-        removeEOGFlag: eogRemoved,
-        extractMIFlag: miExtracted,
-        augmentationMethods: activeAugmentations
-      });
-
-      setEegData(result.processed.data);
-      setLabels(result.processed.labels);
-      setAugmentedDatasets(result.augmented);
-    }
-  }, [eogRemoved, miExtracted]);
 
   // Update augmented datasets when augmentations change
   useEffect(() => {
-    if (eegData && activeAugmentations.length > 0) {
-      const methods = getAugmentationMethods();
-      const newAugmentedDatasets = activeAugmentations.map(methodId => {
-        const method = methods.find(m => m.id === methodId);
-        // Generate mock augmented data
-        const augData = eegData.map(v => v + (Math.random() - 0.5) * 10);
-        return {
-          method: methodId,
-          data: augData,
-          color: method.color
-        };
-      });
+    if (processedEEG && activeAugmentations.length > 0) {
+      const newAugmentedDatasets = activeAugmentations.map((methodId) => ({
+        method: methodId
+      }));
       setAugmentedDatasets(newAugmentedDatasets);
 
-      // Generate mock classification results
-      const motionTypes = ['👈 Left Hand', '👉 Right Hand', '🦶 Feet', '👅 Tongue'];
       const newResults = {};
-      activeAugmentations.forEach(methodId => {
+      activeAugmentations.forEach((methodId) => {
         newResults[methodId] = {
-          predictedClass: motionTypes[Math.floor(Math.random() * motionTypes.length)],
+          predictedClass:
+            RANDOM_MOTION_LABELS[Math.floor(Math.random() * RANDOM_MOTION_LABELS.length)],
           confidence: 0.7 + Math.random() * 0.25
         };
       });
@@ -146,25 +138,47 @@ function NewApp() {
       setAugmentedDatasets([]);
       setClassificationResults({});
     }
-  }, [activeAugmentations, eegData]);
+  }, [activeAugmentations, processedEEG]);
 
   // Handle EOG toggle
   const handleToggleEOG = () => {
-    setEogRemoved(!eogRemoved);
+    const nextValue = !eogRemoved;
+    setEogRemoved(nextValue);
+
+    if (!selectedTrial || isLoading) {
+      return;
+    }
+
+    loadTrialData({
+      trialId: selectedTrial.id,
+      removeEOGFlag: nextValue,
+      extractMIFlag: miExtracted
+    });
   };
 
   // Handle MI toggle
   const handleToggleMI = () => {
-    setMiExtracted(!miExtracted);
+    const nextValue = !miExtracted;
+    setMiExtracted(nextValue);
+
+    if (!selectedTrial || isLoading) {
+      return;
+    }
+
+    loadTrialData({
+      trialId: selectedTrial.id,
+      removeEOGFlag: eogRemoved,
+      extractMIFlag: nextValue
+    });
   };
 
   // Handle augmentation toggle
   const handleToggleAugmentation = (methodId) => {
-    if (activeAugmentations.includes(methodId)) {
-      setActiveAugmentations(activeAugmentations.filter(id => id !== methodId));
-    } else {
-      setActiveAugmentations([...activeAugmentations, methodId]);
-    }
+    setActiveAugmentations((prev) =>
+      prev.includes(methodId)
+        ? prev.filter((id) => id !== methodId)
+        : [...prev, methodId]
+    );
   };
 
   return (
@@ -198,10 +212,16 @@ function NewApp() {
         isOpen={showSelectTrialModal}
         onClose={() => setShowSelectTrialModal(false)}
         onSelectTrial={handleSelectTrial}
+        selectedMotionType={selectedMotionType}
       />
 
       {/* Main Content - Two Column Layout */}
       <main className="app-main">
+        {error && (
+          <div className="error-banner">
+            {error}
+          </div>
+        )}
         {isLoading ? (
           <div className="loading-overlay">
             <div className="spinner-large"></div>
@@ -213,14 +233,14 @@ function NewApp() {
               {/* Left Panel - 60% */}
               <div className="column column-left-60">
                 <LeftPanelNew
-                  eegData={eegData}
+                  eegData={processedEEG}
                   labels={labels}
                   eogRemoved={eogRemoved}
                   onToggleEOG={handleToggleEOG}
                   miExtracted={miExtracted}
                   onToggleMI={handleToggleMI}
                   augmentedDatasets={augmentedDatasets}
-                  activeAugmentations={activeAugmentations}
+                  isLoading={isLoading}
                 />
               </div>
 
@@ -229,7 +249,7 @@ function NewApp() {
                 <RightPanelNew
                   activeAugmentations={activeAugmentations}
                   onToggleAugmentation={handleToggleAugmentation}
-                  hasData={!!eegData}
+                  hasData={!!processedEEG}
                   classificationResults={classificationResults}
                 />
               </div>

@@ -1,44 +1,119 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { fetchTrials } from '../utils/eegApi';
 
-const SelectTrialModal = ({ isOpen, onClose, onSelectTrial }) => {
+const MOTION_TYPE_FROM_TOOLBAR = {
+  left_hand: 'left',
+  right_hand: 'right',
+  feet: 'foot',
+  tongue: 'tongue'
+};
+
+const MOTION_TYPE_OPTIONS = [
+  { value: 'all', label: 'All Motions' },
+  { value: 'left', label: '👈 Left Hand' },
+  { value: 'right', label: '👉 Right Hand' },
+  { value: 'foot', label: '🦶 Feet' },
+  { value: 'tongue', label: '👅 Tongue' }
+];
+
+const buildMotionLabel = (motionType) => {
+  const option = MOTION_TYPE_OPTIONS.find((item) => item.value === motionType);
+  return option ? option.label : motionType;
+};
+
+const SUBJECT_OPTIONS = Array.from({ length: 9 }, (_, index) => index + 1);
+
+const SelectTrialModal = ({ isOpen, onClose, onSelectTrial, selectedMotionType }) => {
   const [selectedSubject, setSelectedSubject] = useState(1);
-  const [selectedTrialIndex, setSelectedTrialIndex] = useState(1);
+  const [trialIndexFilter, setTrialIndexFilter] = useState('all');
+  const [motionFilter, setMotionFilter] = useState('all');
+  const [allTrials, setAllTrials] = useState([]);
+  const [selectedTrialId, setSelectedTrialId] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Mock trial data
-  const generateMockTrials = () => {
-    const motionTypes = ['👈 Left Hand', '👉 Right Hand', '🦶 Feet', '👅 Tongue'];
-    const trials = [];
-
-    for (let subject = 1; subject <= 9; subject++) {
-      for (let trial = 1; trial <= 30; trial++) {
-        trials.push({
-          id: `S${subject}T${trial}`,
-          subject: subject,
-          trialIndex: trial,
-          motionType: motionTypes[Math.floor(Math.random() * motionTypes.length)]
-        });
-      }
+  useEffect(() => {
+    if (!isOpen) {
+      return;
     }
 
-    return trials;
-  };
+    setSelectedTrialId(null);
+    setTrialIndexFilter('all');
+    setSelectedSubject(1);
+    const mappedMotion = MOTION_TYPE_FROM_TOOLBAR[selectedMotionType] ?? 'all';
+    setMotionFilter(mappedMotion);
+  }, [isOpen, selectedMotionType]);
 
-  const [allTrials] = useState(generateMockTrials());
-  const [selectedTrialId, setSelectedTrialId] = useState(null);
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
 
-  if (!isOpen) return null;
+    let isCancelled = false;
 
-  // Filter trials based on dropdown selections
-  const filteredTrials = allTrials.filter(
-    trial => trial.subject === selectedSubject && trial.trialIndex === selectedTrialIndex
+    const loadTrials = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const trials = await fetchTrials();
+        if (!isCancelled) {
+          setAllTrials(trials);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setAllTrials([]);
+          setError(err.message || 'Failed to load trial list from the server.');
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadTrials();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen]);
+
+  const trialsForSubject = useMemo(
+    () => allTrials.filter((trial) => trial.subject === selectedSubject),
+    [allTrials, selectedSubject]
   );
+
+  const trialsForMotion = useMemo(() => {
+    if (motionFilter === 'all') {
+      return trialsForSubject;
+    }
+    return trialsForSubject.filter((trial) => trial.motionType === motionFilter);
+  }, [trialsForSubject, motionFilter]);
+
+  const availableTrialIndexes = useMemo(() => {
+    const unique = new Set(trialsForMotion.map((trial) => trial.trialIndex));
+    return Array.from(unique).sort((a, b) => a - b);
+  }, [trialsForMotion]);
+
+  const filteredTrials = useMemo(() => {
+    if (trialIndexFilter === 'all') {
+      return trialsForMotion;
+    }
+    const targetIndex = Number(trialIndexFilter);
+    return trialsForMotion.filter((trial) => trial.trialIndex === targetIndex);
+  }, [trialsForMotion, trialIndexFilter]);
+
+  if (!isOpen) {
+    return null;
+  }
 
   const handleTrialClick = (trial) => {
     setSelectedTrialId(trial.id);
   };
 
   const handleConfirm = () => {
-    const selectedTrial = allTrials.find(t => t.id === selectedTrialId);
+    const selectedTrial = allTrials.find((trial) => trial.id === selectedTrialId);
     if (selectedTrial) {
       onSelectTrial(selectedTrial);
       onClose();
@@ -63,8 +138,25 @@ const SelectTrialModal = ({ isOpen, onClose, onSelectTrial }) => {
                 value={selectedSubject}
                 onChange={(e) => setSelectedSubject(Number(e.target.value))}
               >
-                {Array.from({ length: 9 }, (_, i) => i + 1).map(num => (
-                  <option key={num} value={num}>Subject {num}</option>
+                {SUBJECT_OPTIONS.map((subject) => (
+                  <option key={subject} value={subject}>
+                    Subject {subject}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="filter-group">
+              <label>Motion Type:</label>
+              <select
+                className="filter-select"
+                value={motionFilter}
+                onChange={(e) => setMotionFilter(e.target.value)}
+              >
+                {MOTION_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -73,76 +165,87 @@ const SelectTrialModal = ({ isOpen, onClose, onSelectTrial }) => {
               <label>Trial Index:</label>
               <select
                 className="filter-select"
-                value={selectedTrialIndex}
-                onChange={(e) => setSelectedTrialIndex(Number(e.target.value))}
+                value={trialIndexFilter}
+                onChange={(e) => setTrialIndexFilter(e.target.value)}
               >
-                {Array.from({ length: 30 }, (_, i) => i + 1).map(num => (
-                  <option key={num} value={num}>Trial {num}</option>
+                <option value="all">All Trials</option>
+                {availableTrialIndexes.map((index) => (
+                  <option key={index} value={String(index)}>
+                    Trial {index}
+                  </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Trial Table */}
-          <div className="trial-table-container">
-            <table className="trial-table">
-              <thead>
-                <tr>
-                  <th>Subject</th>
-                  <th>Trial Index</th>
-                  <th>Motion Type</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTrials.length > 0 ? (
-                  filteredTrials.map(trial => (
-                    <tr
-                      key={trial.id}
-                      className={selectedTrialId === trial.id ? 'selected' : ''}
-                      onClick={() => handleTrialClick(trial)}
-                    >
-                      <td>{trial.subject}</td>
-                      <td>{trial.trialIndex}</td>
-                      <td>{trial.motionType}</td>
+          {isLoading ? (
+            <div className="trial-status">Loading trials...</div>
+          ) : error ? (
+            <div className="trial-status error">{error}</div>
+          ) : filteredTrials.length === 0 ? (
+            <div className="trial-status">No trials match the current filters.</div>
+          ) : (
+            <>
+              {/* Trial Table */}
+              <div className="trial-table-container">
+                <table className="trial-table">
+                  <thead>
+                    <tr>
+                      <th>Trial ID</th>
+                      <th>Subject</th>
+                      <th>Trial Index</th>
+                      <th>Motion Type</th>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan="3" className="no-data">No matching trials</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {filteredTrials.map((trial) => (
+                      <tr
+                        key={trial.id}
+                        className={selectedTrialId === trial.id ? 'selected' : ''}
+                        onClick={() => handleTrialClick(trial)}
+                      >
+                        <td>{trial.id}</td>
+                        <td>{trial.subject}</td>
+                        <td>{trial.trialIndex}</td>
+                        <td>{buildMotionLabel(trial.motionType)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-          {/* Show all trials in scrollable table */}
-          <div className="all-trials-section">
-            <h4>All Trials</h4>
-            <div className="trial-table-container scrollable">
-              <table className="trial-table">
-                <thead>
-                  <tr>
-                    <th>Subject</th>
-                    <th>Trial Index</th>
-                    <th>Motion Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allTrials.map(trial => (
-                    <tr
-                      key={trial.id}
-                      className={selectedTrialId === trial.id ? 'selected' : ''}
-                      onClick={() => handleTrialClick(trial)}
-                    >
-                      <td>{trial.subject}</td>
-                      <td>{trial.trialIndex}</td>
-                      <td>{trial.motionType}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+              {/* Show filtered trials in scrollable table */}
+              <div className="all-trials-section">
+                <h4>Trials for Selected Subject &amp; Motion</h4>
+                <div className="trial-table-container scrollable">
+                  <table className="trial-table">
+                    <thead>
+                      <tr>
+                        <th>Trial ID</th>
+                        <th>Subject</th>
+                        <th>Trial Index</th>
+                        <th>Motion Type</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trialsForMotion.map((trial) => (
+                        <tr
+                          key={trial.id}
+                          className={selectedTrialId === trial.id ? 'selected' : ''}
+                          onClick={() => handleTrialClick(trial)}
+                        >
+                          <td>{trial.id}</td>
+                          <td>{trial.subject}</td>
+                          <td>{trial.trialIndex}</td>
+                          <td>{buildMotionLabel(trial.motionType)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="modal-footer">
