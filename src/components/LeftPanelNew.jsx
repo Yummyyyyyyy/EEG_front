@@ -1,6 +1,14 @@
 import { Line } from 'react-chartjs-2';
 import { getAugmentationMethods } from '../data/newMockData';
 
+const CHANNEL_CONFIG = [
+  { id: 'Fz', name: 'Fz', color: 'rgb(54, 162, 235)' },
+  { id: 'C3', name: 'C3', color: 'rgb(255, 99, 132)' },
+  { id: 'Cz', name: 'Cz', color: 'rgb(255, 205, 86)' },
+  { id: 'C4', name: 'C4', color: 'rgb(75, 192, 192)' },
+  { id: 'Pz', name: 'Pz', color: 'rgb(153, 102, 255)' }
+];
+
 const LeftPanelNew = ({
   eegData,
   labels,
@@ -9,9 +17,14 @@ const LeftPanelNew = ({
   miExtracted,
   onToggleMI,
   augmentedDatasets,
-  activeAugmentations
+  isLoading
 }) => {
-  if (!eegData || !labels) {
+  const hasData = Boolean(
+    eegData?.channels &&
+      Object.values(eegData.channels).some((channelValues) => channelValues?.length)
+  );
+
+  if (!hasData) {
     return (
       <div className="panel left-panel-new">
         <h3 className="panel-title">EEG Signals - 5 Channels</h3>
@@ -22,20 +35,8 @@ const LeftPanelNew = ({
     );
   }
 
-  // 5 classic channels for motor imagery - all use the same color
-  const channelColor = 'rgb(54, 162, 235)'; // Blue for all real channels
-  const channels = [
-    { id: 'C3', name: 'C3' },
-    { id: 'Cz', name: 'Cz' },
-    { id: 'C4', name: 'C4' },
-    { id: 'CP1', name: 'CP1' },
-    { id: 'CP2', name: 'CP2' }
-  ];
-
-  // Get augmentation method colors
   const augMethods = getAugmentationMethods();
 
-  // Create chart options for compact view
   const createChannelOptions = (channelName) => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -57,8 +58,8 @@ const LeftPanelNew = ({
         mode: 'index',
         intersect: false,
         callbacks: {
-          label: function(context) {
-            return `${context.parsed.y.toFixed(2)} μV`;
+          label: function (context) {
+            return `${context.parsed.y.toFixed(4)} μV`;
           }
         }
       }
@@ -83,11 +84,11 @@ const LeftPanelNew = ({
     }
   });
 
-  // Generate mock data for each channel (with slight variations)
-  const generateChannelData = (channelIndex) => {
-    return eegData.map((value, idx) =>
-      value + Math.sin(idx * 0.1 + channelIndex) * 5
-    );
+  const buildChartLabels = (channelValues) => {
+    if (Array.isArray(labels) && labels.length === channelValues.length) {
+      return labels;
+    }
+    return channelValues.map((_, index) => index);
   };
 
   return (
@@ -100,6 +101,7 @@ const LeftPanelNew = ({
           className={`process-btn ${eogRemoved ? 'active' : ''}`}
           onClick={onToggleEOG}
           title="Remove Eye Movement Artifacts"
+          disabled={isLoading}
         >
           {eogRemoved ? '✓' : ''} Remove EOG
         </button>
@@ -107,6 +109,7 @@ const LeftPanelNew = ({
           className={`process-btn ${miExtracted ? 'active' : ''}`}
           onClick={onToggleMI}
           title="Extract Motor Imagery Segment"
+          disabled={isLoading}
         >
           {miExtracted ? '✓' : ''} Extract MI Segment
         </button>
@@ -115,15 +118,15 @@ const LeftPanelNew = ({
       {/* 5 Channel Charts - Compact Display */}
       <div className="panel-content">
         <div className="five-channel-display">
-          {channels.map((channel, idx) => {
-            const channelData = generateChannelData(idx);
+          {CHANNEL_CONFIG.map((channel) => {
+            const channelValues = eegData.channels?.[channel.id] ?? [];
+            const chartLabels = buildChartLabels(channelValues);
 
-            // Build datasets: 5 channels (same color) + augmented data (different colors)
             const datasets = [
               {
                 label: channel.name,
-                data: channelData,
-                borderColor: channelColor,
+                data: channelValues,
+                borderColor: channel.color,
                 backgroundColor: 'transparent',
                 borderWidth: 1.5,
                 pointRadius: 0,
@@ -132,12 +135,12 @@ const LeftPanelNew = ({
               }
             ];
 
-            // Add augmented datasets - each augmentation method shows as a separate line
             augmentedDatasets.forEach((augData) => {
-              const method = augMethods.find(m => m.id === augData.method);
+              const method = augMethods.find((item) => item.id === augData.method);
               if (method) {
-                // Generate augmented data based on original channel data
-                const augChannelData = channelData.map(v => v + (Math.random() - 0.5) * 8);
+                const augChannelData = channelValues.map(
+                  (value) => value + (Math.random() - 0.5) * 5
+                );
                 datasets.push({
                   label: method.name,
                   data: augChannelData,
@@ -153,8 +156,8 @@ const LeftPanelNew = ({
             });
 
             const chartData = {
-              labels: labels,
-              datasets: datasets
+              labels: chartLabels,
+              datasets
             };
 
             return (
