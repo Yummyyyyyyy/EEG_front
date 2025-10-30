@@ -103,3 +103,68 @@ export const generateAugmentedData = async (
   const payload = await handleResponse(response);
   return payload?.data ?? {};
 };
+
+export const downloadAugmentationData = async ({
+  motionType,
+  method,
+  numSamples,
+  fileType
+}) => {
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/api/augmentation/download`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      motionType,
+      method,
+      numSamples,
+      fileType
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    let message = `Download failed with status ${response.status}`;
+
+    try {
+      const parsed = JSON.parse(errorText);
+      if (parsed?.detail) {
+        message = parsed.detail;
+      }
+    } catch {
+      message = errorText || message;
+    }
+
+    throw new Error(message);
+  }
+
+  // Get filename from Content-Disposition header
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = `${method}_${motionType}_${numSamples}.${fileType}`;
+
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename=(.+)/);
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1];
+    }
+  }
+
+  // Get blob from response
+  const blob = await response.blob();
+
+  // Create download link
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(downloadUrl);
+
+  return { success: true, filename };
+};

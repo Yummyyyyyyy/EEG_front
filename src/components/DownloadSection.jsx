@@ -1,18 +1,21 @@
 import { useState } from 'react';
 import { getAugmentationMethods } from '../data/newMockData';
+import { downloadAugmentationData } from '../utils/eegApi';
 
 const DownloadSection = ({ selectedMotionType }) => {
   const methods = getAugmentationMethods();
   const motionTypes = [
-    { id: 'left_hand', name: '👈 Left Hand' },
-    { id: 'right_hand', name: '👉 Right Hand' },
-    { id: 'feet', name: '🦶 Feet' },
+    { id: 'left', name: '👈 Left Hand' },
+    { id: 'right', name: '👉 Right Hand' },
+    { id: 'foot', name: '🦶 Feet' },
     { id: 'tongue', name: '👅 Tongue' }
   ];
 
   const [selectedDataTypes, setSelectedDataTypes] = useState([]);
   const [selectedMethods, setSelectedMethods] = useState([]);
   const [dataCount, setDataCount] = useState(100);
+  const [fileType, setFileType] = useState('npz');
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const handleDataTypeToggle = (typeId) => {
     if (selectedDataTypes.includes(typeId)) {
@@ -30,32 +33,51 @@ const DownloadSection = ({ selectedMotionType }) => {
     }
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (selectedDataTypes.length === 0 || selectedMethods.length === 0) {
       alert('Please select at least one data type and one augmentation method');
       return;
     }
 
-    // Create CSV content
-    let csvContent = 'Data Type,Augmentation Method,Sample Count\n';
-    selectedDataTypes.forEach(dataType => {
-      const typeName = motionTypes.find(t => t.id === dataType)?.name || dataType;
-      selectedMethods.forEach(method => {
-        const methodName = methods.find(m => m.id === method)?.name || method;
-        csvContent += `${typeName},${methodName},${dataCount}\n`;
-      });
-    });
+    setIsDownloading(true);
+    let successCount = 0;
+    let errorCount = 0;
+    const totalDownloads = selectedDataTypes.length * selectedMethods.length;
 
-    // Create and download file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `augmented_eeg_data_${Date.now()}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    try {
+      for (const dataType of selectedDataTypes) {
+        for (const method of selectedMethods) {
+          try {
+            await downloadAugmentationData({
+              motionType: dataType,
+              method: method,
+              numSamples: dataCount,
+              fileType: fileType
+            });
+            successCount++;
+
+            // Add a small delay between downloads to avoid overwhelming the browser
+            if (successCount < totalDownloads) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+          } catch (error) {
+            console.error(`Failed to download ${method} for ${dataType}:`, error);
+            errorCount++;
+          }
+        }
+      }
+
+      if (successCount > 0) {
+        alert(`Successfully downloaded ${successCount} file(s)${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
+      } else {
+        alert('All downloads failed. Please check your selections and try again.');
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Download failed: ' + (error.message || 'Unknown error'));
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -74,6 +96,7 @@ const DownloadSection = ({ selectedMotionType }) => {
                     type="checkbox"
                     checked={selectedDataTypes.includes(type.id)}
                     onChange={() => handleDataTypeToggle(type.id)}
+                    disabled={isDownloading}
                   />
                   <span className="checkbox-label-text">{type.name}</span>
                 </label>
@@ -91,6 +114,7 @@ const DownloadSection = ({ selectedMotionType }) => {
                     type="checkbox"
                     checked={selectedMethods.includes(method.id)}
                     onChange={() => handleMethodToggle(method.id)}
+                    disabled={isDownloading}
                   />
                   <span
                     className="checkbox-label-text"
@@ -117,15 +141,46 @@ const DownloadSection = ({ selectedMotionType }) => {
                   onChange={(e) => setDataCount(Math.max(1, parseInt(e.target.value) || 1))}
                   min="1"
                   max="10000"
+                  disabled={isDownloading}
                 />
+              </div>
+
+              <div className="file-type-group" style={{ marginTop: '16px', marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600 }}>File Type:</label>
+                <div className="file-type-options" style={{ display: 'flex', gap: '12px' }}>
+                  <label className="radio-item" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="fileType"
+                      value="npz"
+                      checked={fileType === 'npz'}
+                      onChange={(e) => setFileType(e.target.value)}
+                      disabled={isDownloading}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span>NPZ (Complete Data)</span>
+                  </label>
+                  <label className="radio-item" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="fileType"
+                      value="csv"
+                      checked={fileType === 'csv'}
+                      onChange={(e) => setFileType(e.target.value)}
+                      disabled={isDownloading}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span>CSV (Readable)</span>
+                  </label>
+                </div>
               </div>
 
               <button
                 className="download-btn-large"
                 onClick={handleDownload}
-                disabled={selectedDataTypes.length === 0 || selectedMethods.length === 0}
+                disabled={selectedDataTypes.length === 0 || selectedMethods.length === 0 || isDownloading}
               >
-                Download CSV
+                {isDownloading ? 'Downloading...' : 'Download Files'}
               </button>
 
               <div className="download-summary">
@@ -136,6 +191,11 @@ const DownloadSection = ({ selectedMotionType }) => {
                 <p>
                   <strong>Total files:</strong>{' '}
                   {selectedDataTypes.length * selectedMethods.length}
+                </p>
+                <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+                  {dataCount > 0 && (
+                    <>If requested samples exceed available data, zeros will be padded.</>
+                  )}
                 </p>
               </div>
             </div>
