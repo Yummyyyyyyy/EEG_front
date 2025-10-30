@@ -4,7 +4,8 @@ const RightPanelNew = ({
   activeAugmentations,
   onToggleAugmentation,
   hasData,
-  classificationResults
+  classificationResults,
+  isAugmenting
 }) => {
   const methods = getAugmentationMethods();
 
@@ -33,7 +34,7 @@ const RightPanelNew = ({
                     key={method.id}
                     className={`aug-btn-compact ${isActive ? 'active' : ''}`}
                     onClick={() => onToggleAugmentation(method.id)}
-                    disabled={!hasData}
+                    disabled={!hasData || isAugmenting}
                     style={{
                       '--method-color': method.color,
                       '--method-color-light': method.color.replace('rgb', 'rgba').replace(')', ', 0.15)')
@@ -78,7 +79,7 @@ const RightPanelNew = ({
                       </div>
                     ) : (
                       <div className="classification-result-content inactive-text">
-                        {isActive ? 'Processing...' : 'Not Active'}
+                        {isActive ? (isAugmenting ? 'Generating...' : 'Awaiting Data') : 'Not Active'}
                       </div>
                     )}
                   </div>
