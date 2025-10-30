@@ -77,3 +77,29 @@ export const fetchTrialEEGData = async (
   const payload = await handleResponse(response);
   return payload?.data ?? {};
 };
+
+export const generateAugmentedData = async (
+  trialId,
+  methods,
+  eegData,
+  count = 10
+) => {
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/api/augmentation/generate`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      trialId,
+      methods,
+      eegData,
+      count
+    })
+  });
+
+  const payload = await handleResponse(response);
+  return payload?.data ?? {};
+};

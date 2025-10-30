@@ -16,7 +16,7 @@ import SelectTrialModal from './components/SelectTrialModal';
 import LeftPanelNew from './components/LeftPanelNew';
 import RightPanelNew from './components/RightPanelNew';
 import DownloadSection from './components/DownloadSection';
-import { fetchTrialEEGData } from './utils/eegApi';
+import { fetchTrialEEGData, generateAugmentedData } from './utils/eegApi';
 import './NewApp.css';
 
 // Register Chart.js components
@@ -61,17 +61,21 @@ function NewApp() {
 
   // Classification results
   const [classificationResults, setClassificationResults] = useState({});
+  const [augmentationError, setAugmentationError] = useState(null);
 
   // Loading state
   const [isLoading, setIsLoading] = useState(false);
+  const [isAugmenting, setIsAugmenting] = useState(false);
 
   const loadTrialData = async ({ trialId, removeEOGFlag, extractMIFlag }) => {
     if (!trialId) {
       return;
     }
 
+    setIsAugmenting(false);
     setIsLoading(true);
     setError(null);
+    setAugmentationError(null);
 
     try {
       const data = await fetchTrialEEGData(trialId, {
@@ -109,6 +113,7 @@ function NewApp() {
     setActiveAugmentations([]);
     setAugmentedDatasets([]);
     setClassificationResults({});
+    setAugmentationError(null);
 
     loadTrialData({
       trialId: selectedTrial.id,
@@ -117,28 +122,74 @@ function NewApp() {
     });
   };
 
-  // Update augmented datasets when augmentations change
+  // Update augmented datasets when augmentation selection changes
   useEffect(() => {
-    if (processedEEG && activeAugmentations.length > 0) {
-      const newAugmentedDatasets = activeAugmentations.map((methodId) => ({
-        method: methodId
-      }));
-      setAugmentedDatasets(newAugmentedDatasets);
+    const fetchAugmentedData = async () => {
+      if (!processedEEG || !selectedTrial || activeAugmentations.length === 0) {
+        setAugmentedDatasets([]);
+        setClassificationResults({});
+        setAugmentationError(null);
+        return;
+      }
 
-      const newResults = {};
-      activeAugmentations.forEach((methodId) => {
-        newResults[methodId] = {
-          predictedClass:
-            RANDOM_MOTION_LABELS[Math.floor(Math.random() * RANDOM_MOTION_LABELS.length)],
-          confidence: 0.7 + Math.random() * 0.25
-        };
-      });
-      setClassificationResults(newResults);
-    } else {
+      const supportedMethods = ['tcn', 'gan', 'vae', 'diffusion'];
+      const methodsToRequest = activeAugmentations.filter((method) => supportedMethods.includes(method));
+
+      if (methodsToRequest.length === 0) {
+        setAugmentedDatasets([]);
+        setClassificationResults({});
+        setAugmentationError(null);
+        return;
+      }
+
+      const currentTrialId = selectedTrial.id;
+      setIsAugmenting(true);
       setAugmentedDatasets([]);
       setClassificationResults({});
-    }
-  }, [activeAugmentations, processedEEG]);
+
+      try {
+        const data = await generateAugmentedData(
+          currentTrialId,
+          methodsToRequest,
+          processedEEG
+        );
+
+        if (!selectedTrial || selectedTrial.id !== currentTrialId) {
+          return;
+        }
+
+        const datasets = methodsToRequest
+          .map((methodId) => data?.[methodId])
+          .filter(Boolean)
+          .map((item) => ({
+            method: item.method,
+            channels: item.channels
+          }));
+
+        setAugmentedDatasets(datasets);
+
+        const newResults = {};
+        methodsToRequest.forEach((methodId) => {
+          newResults[methodId] = {
+            predictedClass:
+              RANDOM_MOTION_LABELS[Math.floor(Math.random() * RANDOM_MOTION_LABELS.length)],
+            confidence: 0.7 + Math.random() * 0.25
+          };
+        });
+        setClassificationResults(newResults);
+        setAugmentationError(null);
+      } catch (err) {
+        console.error('Failed to generate augmented data', err);
+        setAugmentedDatasets([]);
+        setClassificationResults({});
+        setAugmentationError(err.message || 'Failed to generate augmented EEG data.');
+      } finally {
+        setIsAugmenting(false);
+      }
+    };
+
+    fetchAugmentedData();
+  }, [activeAugmentations, processedEEG, selectedTrial]);
 
   // Handle EOG toggle
   const handleToggleEOG = () => {
@@ -181,6 +232,8 @@ function NewApp() {
     );
   };
 
+  const combinedError = error || augmentationError;
+
   return (
     <div className="new-app">
       {/* Header */}
@@ -217,9 +270,9 @@ function NewApp() {
 
       {/* Main Content - Two Column Layout */}
       <main className="app-main">
-        {error && (
+        {combinedError && (
           <div className="error-banner">
-            {error}
+            {combinedError}
           </div>
         )}
         {isLoading ? (
@@ -241,6 +294,7 @@ function NewApp() {
                   onToggleMI={handleToggleMI}
                   augmentedDatasets={augmentedDatasets}
                   isLoading={isLoading}
+                  isAugmenting={isAugmenting}
                 />
               </div>
 
@@ -251,6 +305,7 @@ function NewApp() {
                   onToggleAugmentation={handleToggleAugmentation}
                   hasData={!!processedEEG}
                   classificationResults={classificationResults}
+                  isAugmenting={isAugmenting}
                 />
               </div>
             </div>

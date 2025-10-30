@@ -1215,6 +1215,13 @@ body {
   background: white;
 }
 
+.chart-placeholder {
+  font-size: 0.85rem;
+  color: #64748b;
+  text-align: center;
+  padding: 1.5rem 0;
+}
+
 /* Right Panel New */
 .right-panel-layout {
   display: grid;
