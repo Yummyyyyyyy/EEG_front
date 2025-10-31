@@ -168,3 +168,26 @@ export const downloadAugmentationData = async ({
 
   return { success: true, filename };
 };
+
+export const fetchClassification = async (
+  trialId,
+  motionType,
+  numTrials = 10
+) => {
+  if (!trialId) {
+    throw new Error('trialId is required to fetch classification.');
+  }
+
+  if (!motionType) {
+    throw new Error('motionType is required to fetch classification.');
+  }
+
+  const baseUrl = getBaseUrl();
+  const url = new URL(`${baseUrl}/api/classification/${trialId}`);
+  url.searchParams.append('motionType', motionType);
+  url.searchParams.append('numTrials', numTrials);
+
+  const response = await fetch(url.toString());
+  const payload = await handleResponse(response);
+  return payload?.data ?? null;
+};
