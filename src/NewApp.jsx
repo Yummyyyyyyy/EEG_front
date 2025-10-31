@@ -16,7 +16,7 @@ import SelectTrialModal from './components/SelectTrialModal';
 import LeftPanelNew from './components/LeftPanelNew';
 import RightPanelNew from './components/RightPanelNew';
 import DownloadSection from './components/DownloadSection';
-import { fetchTrialEEGData, generateAugmentedData } from './utils/eegApi';
+import { fetchTrialEEGData, generateAugmentedData, fetchClassification } from './utils/eegApi';
 import './NewApp.css';
 
 // Register Chart.js components
@@ -31,7 +31,21 @@ ChartJS.register(
   Filler
 );
 
-const RANDOM_MOTION_LABELS = ['👈 Left Hand', '👉 Right Hand', '🦶 Feet', '👅 Tongue'];
+// Motion type mapping
+const MOTION_TYPE_MAP = {
+  'left_hand': 'left',
+  'right_hand': 'right',
+  'feet': 'feet',
+  'foot': 'feet',
+  'tongue': 'tongue'
+};
+
+const MOTION_LABEL_MAP = {
+  'left': '👈 Left Hand',
+  'right': '👉 Right Hand',
+  'feet': '🦶 Feet',
+  'tongue': '👅 Tongue'
+};
 
 function NewApp() {
   // Mode and selection states
@@ -148,6 +162,7 @@ function NewApp() {
       setClassificationResults({});
 
       try {
+        // Fetch augmented data
         const data = await generateAugmentedData(
           currentTrialId,
           methodsToRequest,
@@ -168,15 +183,37 @@ function NewApp() {
 
         setAugmentedDatasets(datasets);
 
-        const newResults = {};
-        methodsToRequest.forEach((methodId) => {
-          newResults[methodId] = {
-            predictedClass:
-              RANDOM_MOTION_LABELS[Math.floor(Math.random() * RANDOM_MOTION_LABELS.length)],
-            confidence: 0.7 + Math.random() * 0.25
-          };
-        });
-        setClassificationResults(newResults);
+        // Fetch classification results from backend
+        const motionType = MOTION_TYPE_MAP[selectedMotionType] || selectedTrial.motionType;
+
+        try {
+          const classificationData = await fetchClassification(
+            currentTrialId,
+            motionType,
+            10
+          );
+
+          if (classificationData && classificationData.predictions) {
+            const newResults = {};
+
+            classificationData.predictions.forEach((pred) => {
+              const methodId = pred.method;
+              const predictedMotion = pred.predicted;
+
+              newResults[methodId] = {
+                predictedClass: MOTION_LABEL_MAP[predictedMotion] || predictedMotion,
+                confidence: pred.confidence
+              };
+            });
+
+            setClassificationResults(newResults);
+          }
+        } catch (classErr) {
+          console.error('Failed to fetch classification results:', classErr);
+          // Fall back to empty results if classification fails
+          setClassificationResults({});
+        }
+
         setAugmentationError(null);
       } catch (err) {
         console.error('Failed to generate augmented data', err);
@@ -189,7 +226,7 @@ function NewApp() {
     };
 
     fetchAugmentedData();
-  }, [activeAugmentations, processedEEG, selectedTrial]);
+  }, [activeAugmentations, processedEEG, selectedTrial, selectedMotionType]);
 
   // Handle EOG toggle
   const handleToggleEOG = () => {
